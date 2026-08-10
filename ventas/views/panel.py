@@ -13,6 +13,8 @@ from datetime import timedelta
 import json
 from django.http import JsonResponse
 from django.db import transaction
+from django.views.generic import ListView, DeleteView, UpdateView, CreateView, DetailView, TemplateView, View
+from django.template.loader import render_to_string
 from productos.models import Producto
 from ventas.models import Pedido, DetallePedido
 from ventas.views.helpers import registrar_historial, registrar_log
@@ -161,7 +163,6 @@ class PanelPedidosView(ListView):
     model = Pedido
     template_name = 'ventas/panel_pedidos.html'
     context_object_name = 'pedidos'
-    paginate_by = 10
 
     def get_queryset(self):
         # CAMBIO CLAVE: Cambiamos select_related por prefetch_related para traer los detalles sin ahorcar la base de datos
@@ -195,6 +196,26 @@ class PanelPedidosView(ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        
+        # Obtenemos el queryset filtrado (búsqueda y filtros)
+        qs = self.get_queryset()
+
+        # Separamos en dos listas (Activos/Pendientes vs Finalizados)
+        # QA Fix: 'pagado' es activo porque el dueño aún debe enviarlo/entregarlo.
+        estados_activos = ['pendiente', 'pendiente_transferencia', 'pagado', 'enviado']
+        estados_terminados = ['entregado', 'cancelado']
+
+        # Si no hay filtros aplicados, limitamos a los últimos 30
+        if not self.request.GET:
+            context['pedidos_activos'] = qs.filter(estado__in=estados_activos)[:30]
+            context['pedidos_terminados'] = qs.filter(estado__in=estados_terminados)[:30]
+        else:
+            # QA Fix: Límite de seguridad en búsquedas para no cargar 10.000 registros en RAM
+            context['pedidos_activos'] = qs.filter(estado__in=estados_activos)[:50]
+            context['pedidos_terminados'] = qs.filter(estado__in=estados_terminados)[:50]
+
+        # Ya no usamos object_list / pedidos general
+        context['pedidos'] = None 
 
         # Definición de estados para el negocio
         estados_lista = ['pendiente', 'pagado', 'enviado', 'entregado', 'cancelado']
@@ -257,6 +278,53 @@ class TicketVentaDetailView(DetailView):
         # El total ya no se calcula multiplicando porque ahora viene guardado en el pedido
         context['total'] = self.object.total
         return context
+
+@method_decorator(staff_member_required, name='dispatch')
+class PedidoHistorialModalView(View):
+    """
+    Devuelve un trozo de HTML (Partial) con el timeline unificado del pedido
+    para inyectarlo en el Modal asíncrono del panel.
+    """
+    def get(self, request, pk, *args, **kwargs):
+        try:
+            pedido = Pedido.objects.get(pk=pk)
+        except Pedido.DoesNotExist:
+            return JsonResponse({'error': 'Pedido no encontrado'}, status=404)
+
+        # 1. Obtener Historial de Estados
+        historial = pedido.historial.all()
+        # 2. Obtener Logs Generales
+        logs = pedido.logs.all()
+
+        # Unificar ambos en una sola lista de diccionarios para el timeline
+        timeline = []
+        for h in historial:
+            timeline.append({
+                'tipo': 'estado',
+                'fecha': h.fecha_cambio,
+                'descripcion': f"Estado cambiado a {h.estado_nuevo}",
+                'estado_nuevo': h.estado_nuevo,
+                'usuario': h.usuario.username if h.usuario else "Sistema"
+            })
+            
+        for l in logs:
+            timeline.append({
+                'tipo': 'log',
+                'fecha': l.fecha,
+                'descripcion': l.accion,
+                'usuario': l.usuario.username if l.usuario else "Sistema"
+            })
+            
+        # Ordenar por fecha cronológica (el más reciente primero)
+        timeline.sort(key=lambda x: x['fecha'], reverse=True)
+
+        # Renderizar un template parcial
+        html = render_to_string('ventas/partials/historial_timeline.html', {
+            'pedido': pedido,
+            'timeline': timeline
+        })
+        
+        return JsonResponse({'html': html})
 
 @method_decorator(staff_member_required, name='dispatch')
 class GestorOfertasView(TemplateView):
