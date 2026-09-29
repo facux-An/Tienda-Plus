@@ -15,7 +15,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="{% block meta_description %}Tienda Plus — Productos premium para el cuidado de tu gato. Envíos a todo el país.{% endblock %}">
   <title>{% block title %}Tienda Plus{% endblock %}</title>
+  <!-- 1. Ícono clásico para PC -->
   <link rel="icon" href="{% static 'img/favicon.png' %}" type="image/png">
+  <!-- 2. Ícono alta resolución para iOS/Apple -->
+  <link rel="apple-touch-icon" href="{% static 'img/favicon-192.png' %}">
+  <!-- 3. Metadatos PWA (Android / Google Chrome) -->
+  <link rel="manifest" href="{% static 'manifest.json' %}">
+  <!-- 4. Color de la barra de navegación del celular -->
+  <meta name="theme-color" content="#FF6600">
+
 
   <!-- Preconnect: abre conexiones TCP/TLS con servidores externos ANTES de que el browser las pida.
        Esto ahorra 200-400ms por recurso en la primera visita. -->
